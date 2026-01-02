@@ -26,7 +26,7 @@ def readArc(chemin):
 
             # Au moins 2 points
             if len(TAB_OBS) < 2:
-                return
+                continue
 
             track = Track(TAB_OBS)
             computeAbsCurv(track)
