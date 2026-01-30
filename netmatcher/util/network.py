@@ -3,9 +3,252 @@
 
 from tracklib import Network, Node
 from tracklib import compare, MODE_COMPARISON_HAUSDORFF
+import tracklib as tkl
+import sys
+
+tkl.NetworkReader.counter = 1
+
+
+def createNetwork(collection, tolerance):
+    network = tkl.Network()
+    cptNode = 0
+
+    for track in collection:
+        tkl.computeAbsCurv(track)
+
+        edge_id = tkl.NetworkReader.counter
+        tkl.NetworkReader.counter = tkl.NetworkReader.counter + 1
+        edge = tkl.Edge(edge_id, track)
+        edge.orientation = tkl.Edge.DOUBLE_SENS
+        edge.weight = track.length()
+
+        # On cherche si les noeuds n'existent pas déjà et si c'est le cas
+        #   on change aussi la géométrie des premiers et derniers noeuds
+
+        # Source node
+        p1 = track.getFirstObs().position
+        candidates1 = tkl.selectNodes(network, tkl.Node(-1, p1), tolerance)
+        if len(candidates1) == 1:
+            noeudIni = candidates1[0]
+            edge.geom.setObs(0, tkl.Obs(noeudIni.coord, tkl.ObsTime()))
+        elif len(candidates1) > 1:
+            # plusieurs, on prend le plus proche
+            d = sys.float_info.max
+            for c in candidates1:
+                if c.coord.distance2DTo(p1) <= d:
+                    noeudIni = c
+                    edge.geom.setObs(0, tkl.Obs(c.coord, tkl.ObsTime()))
+                    d = c.coord.distance2DTo(p1)
+        else:
+            noeudIni = tkl.Node(cptNode, p1)
+            cptNode += 1
+
+
+        # Target node
+        p2 = track.getLastObs().position
+        candidates2 = tkl.selectNodes(network, tkl.Node(-2, p2), tolerance)
+        if noeudIni in candidates2:
+            candidates2.remove(noeudIni)
+
+        if len(candidates2) == 1:
+            noeudFin = candidates2[0]
+            edge.geom.setObs(edge.geom.size()-1, tkl.Obs(noeudFin.coord, tkl.ObsTime()))
+        elif len(candidates2) > 1:
+            d = sys.float_info.max
+            for c in candidates2:
+                if c.coord.distance2DTo(p2) < d:
+                    noeudFin = c
+                    edge.geom.setObs(edge.geom.size()-1, tkl.Obs(c.coord, tkl.ObsTime()))
+                    d = c.coord.distance2DTo(p2)
+        else:
+            noeudFin = tkl.Node(cptNode, p2)
+            cptNode += 1
+
+
+        #
+        existant = False
+        for edge2 in network:
+            if edge.id == edge2.id:
+                continue
+            track2 = edge2.geom
+            track1 = edge.geom
+            mode=tkl.MODE_COMPARISON_POINTWISE
+            p=1
+            dim=2
+            d = tkl.compare(track1, track2, mode, p, dim)
+            if d < 0.1:
+                existant = True
+
+        if not existant:
+            network.addEdge(edge, noeudIni, noeudFin)
+
+    return network
+
+
+def filtreNoeudSimple(network):
+    '''
+    Filtre des noeuds simples
+    #  c'est-à-dire avec seulement deux arcs incidents,
+    #           si ils ont des orientations compatibles.
+    # Ces noeuds sont enlevés et un seul arc est créé à la place
+    # des deux arcs incidents.
+    '''
+
+    noeudsElimines = []
+
+    for idnode in network.getIndexNodes():
+        node = network.NODES[idnode]
+        pt = node.coord
+
+        if idnode not in network.NBGR_EDGES:
+            continue
+        nb = len(network.getIncidentEdges(idnode))
+        if nb != 2:
+            continue
+
+        arc1 = network.EDGES[network.NBGR_EDGES[idnode][0]]
+        n1i = arc1.source.id
+        n1f = arc1.target.id
+        arc2 = network.EDGES[network.NBGR_EDGES[idnode][1]]
+        n2i = arc2.source.id
+        n2f = arc2.target.id
+
+
+        # On construit la nouvelle trace, attention au sens de la géométrie
+        # quel noeud pour ni et nf ?
+        ni = None
+        nf = None
+        nm = None
+
+        if n1f == n2i:
+            # print ('     sens : ', arc1.source.id, arc1.target.id, arc2.target.id)
+            track = arc1.geom + arc2.geom
+            ni = arc1.source
+            nf = arc2.target
+            nm = arc1.target
+            if nm.id != arc2.source.id:
+                print ('probleme 1')
+        elif n1f == n2f:
+            track = arc1.geom + arc2.geom.reverse()
+            ni = arc1.source
+            nf = arc2.source
+            nm = arc1.target
+            if nm.id != arc2.target.id:
+                print ('probleme 2')
+        elif n1i == n2i:
+            track = arc1.geom.reverse() + arc2.geom
+            ni = arc1.target
+            nf = arc2.target
+            nm = arc1.source
+            if nm.id != arc2.source.id:
+                print ('probleme 3')
+        elif n1i == n2f:
+            track = arc1.geom.reverse() + arc2.geom.reverse()
+            ni = arc1.target
+            nf = arc2.source
+            nm = arc1.source
+            if nm.id != arc2.target.id:
+                print ('probleme 4')
+
+
+        # Nouvel arc
+        edge_id = tkl.NetworkReader.counter
+        tkl.NetworkReader.counter = tkl.NetworkReader.counter + 1
+
+        edgefusion = tkl.Edge(edge_id, track)
+        edgefusion.orientation = tkl.Edge.DOUBLE_SENS
+        edgefusion.weight = track.length()
+        #if str(idnode) == '2365':
+        #    print ('     nouvel arc : ', edge_id, ni.id, nf.id)
+        #    print ('     anciens arcs : ', arc1.id, arc2.id)
+        #    print ('     arc du milieu : ', nm.id)
+
+        if ni is None or nf is None:
+            print ('NULL')
+
+        # on crée
+        try :
+            network.addEdge(edgefusion, ni, nf)
+        except Exception as e:
+            print (n1i, n1f, n2i, n2f)
+            print (e)
+
+
+        # on supprime les incidences du noeud du milieu
+        del network.PREV_EDGES[nm.id]
+        del network.NEXT_EDGES[nm.id]
+        del network.NBGR_EDGES[nm.id]
+
+        network.NEXT_EDGES[ni.id].remove(arc1.id)
+        network.NBGR_EDGES[ni.id].remove(arc1.id)
+        network.NEXT_NODES[ni.id].remove(nm.id)
+        network.NBGR_NODES[ni.id].remove(nm.id)
+
+        network.PREV_EDGES[nf.id].remove(arc2.id)
+        network.NBGR_EDGES[nf.id].remove(arc2.id)
+        network.PREV_NODES[nf.id].remove(nm.id)
+        network.NBGR_NODES[nf.id].remove(nm.id)
+
+        # On supprime le noeud du milieu
+        noeudsElimines.append(idnode)
+        # network.removeNode(node)
+
+        network.removeEdge(arc2)
+        network.removeEdge(arc1)
+
+
+    if len(noeudsElimines) > 0:
+        # print (NoeudsASupprimer)
+        for nid in noeudsElimines:
+            node = network.NODES[nid]
+            network.removeNode(node)
+
+
+
+def deleteSmallEdge(network, threshold):
+    '''
+       Suppression des petits arcs et qui n'ont qu'une seule incidence
+    '''
+    for eid in network.getIndexEdges():
+        edge = network.EDGES[eid]
+        ni = edge.source
+        nf = edge.target
+        if edge.geom.length() < threshold and (len(network.getIncidentEdges(ni.id)) <= 1
+                        or len(network.getIncidentEdges(nf.id)) <= 1):
+
+            if len(network.getIncidentEdges(ni.id)) <= 1:
+                # print ('suppression à faire ', edge.id, ni.id)
+                # on supprime le noeud
+                network.NEXT_NODES[nf.id].remove(ni.id)
+                network.NEXT_EDGES[nf.id].remove(edge.id)
+                network.NBGR_NODES[nf.id].remove(ni.id)
+                network.NBGR_EDGES[nf.id].remove(edge.id)
+
+                if ni.id in network.getIndexNodes():
+                    network.removeNode(ni)
+                else:
+                    print ('------', ni.id)
+
+            if len(network.getIncidentEdges(nf.id)) <= 1:
+                # print ('suppression à faire ', edge.id, nf.id)
+                # on supprime le noeud
+                network.NEXT_NODES[ni.id].remove(nf.id)
+                network.NEXT_EDGES[ni.id].remove(edge.id)
+                network.NBGR_NODES[ni.id].remove(nf.id)
+                network.NBGR_EDGES[ni.id].remove(edge.id)
+
+                network.removeNode(nf)
+
+            network.removeEdge(edge)
+
 
 
 class NetworkNM():
+
+    @staticmethod
+    def filtreNoeudsSimples(network):
+        nb = len(network.NBGR_EDGES[node])        
+        pass
 
     @staticmethod
     def filtreDoublons(network, tolerance):
