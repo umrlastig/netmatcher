@@ -49,7 +49,7 @@ def appariementDeJeuxGeo(param):
 
 
     liens = appariementReseaux(network1, network2, param)
-    #return (reseau1, reseau2, liens)
+    return (network1, network2, liens)
 
 
 

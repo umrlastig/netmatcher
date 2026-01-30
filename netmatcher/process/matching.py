@@ -37,10 +37,10 @@ def appariementReseaux(reseau1, reseau2, param):
 
     '''
 
-    # Pre-matching using nodes.
+    # Pre-matching of nodes.
     liensPreAppNN = preAppariementNoeudNoeud(reseau1, reseau2, param)
 
-    # Pre-matching using edges
+    # Pre-matching of edges
     if len(liensPreAppNN) > 0:
         # liensPreAppAA sur les noeuds. Preappariement des arcs entre eux
         # (basé principalement sur Hausdorf).
@@ -65,16 +65,10 @@ def preAppariementNoeudNoeud(network1, network2, param):
     Nodes Prematching using euclidian distance as proposed in [Devogèle 97].
    
     On crée des liens 1-n (n candidats noeuds de BDcomp pour chaque noeud de BDref).
+    NB1: On ne traite pas les noeuds isolés.
     
-    Comme suggéré dans [Devogèle 97], la taille de la recherche peut varier
-    selon le type du noeud de la BD de reférence (rond point, changement
-    d'attribut...).
-   
-    - NB1: On préfére largement une taille de recherche sur-évaluée que sous-évaluée.
-    - NB2: On ne traite pas les noeuds isolés.
-    
-    @param reseau1 NetworkNM 
-    @param reseau2 NetworkNM 
+    @param network less detailed NetworkNM 
+    @param network more detailed NetworkNM 
     @param param matching paramters
     @return resulting set of links between networks
 
